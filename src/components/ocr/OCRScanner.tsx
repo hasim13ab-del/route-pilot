@@ -1,52 +1,186 @@
 import { useState, useCallback, ChangeEvent } from 'react';
-import { Camera, Upload, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Camera, Upload, Loader2, CheckCircle2, AlertCircle, AlertTriangle, Package, MapPin, Phone, CreditCard, Hash } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ImageProcessor } from '@/services/ocr/image-processor';
 import { OCRResult } from '@/services/ocr/ocr.service';
+import { ShipmentExtractor } from '@/services/ocr/shipment-extractor';
+import { Validator } from '@/services/ocr/validator';
+import { Shipment } from '@/types/shipment';
+
 export function OCRScanner({ onResult }: { onResult: (result: OCRResult) => void }) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState('');
+
   const handleFileUpload = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
+
     setIsProcessing(true);
     setProgress('Initializing OCR...');
+
     try {
       const result = await ImageProcessor.processTiledImage(file);
       onResult(result);
-    } catch { setProgress('Error processing image'); }
-    finally { setIsProcessing(false); setProgress(''); }
+    } catch {
+      setProgress('Error processing image');
+    } finally {
+      setIsProcessing(false);
+      setProgress('');
+    }
   }, [onResult]);
+
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-4">
-        <Button variant="outline" className="h-24 flex flex-col gap-2" onClick={() => document.getElementById('camera-input')?.click()}>
-          <Camera className="w-8 h-8" /><span>Camera</span>
+        <Button
+          variant="outline"
+          className="h-28 flex flex-col gap-2 border-2 border-dashed"
+          onClick={() => document.getElementById('camera-input')?.click()}
+          disabled={isProcessing}
+        >
+          <Camera className="w-10 h-10 text-primary" />
+          <span className="font-bold">Camera</span>
         </Button>
-        <Button variant="outline" className="h-24 flex flex-col gap-2" onClick={() => document.getElementById('file-input')?.click()}>
-          <Upload className="w-8 h-8" /><span>Upload</span>
+        <Button
+          variant="outline"
+          className="h-28 flex flex-col gap-2 border-2 border-dashed"
+          onClick={() => document.getElementById('file-input')?.click()}
+          disabled={isProcessing}
+        >
+          <Upload className="w-10 h-10 text-primary" />
+          <span className="font-bold">Gallery</span>
         </Button>
       </div>
+
       <input id="camera-input" type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFileUpload} />
       <input id="file-input" type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />
+
       {isProcessing && (
-        <div className="flex items-center justify-center p-8 bg-white rounded-lg border border-primary/20 animate-pulse">
-          <Loader2 className="w-10 h-10 text-primary animate-spin mr-3" />
-          <p className="font-medium text-primary">{progress || 'Processing...'}</p>
+        <div className="flex flex-col items-center justify-center p-12 bg-white rounded-xl border-2 border-primary/10 shadow-xl animate-pulse">
+          <Loader2 className="w-12 h-12 text-primary animate-spin mb-4" />
+          <p className="font-bold text-lg text-primary">{progress || 'Analyzing Screenshot...'}</p>
+          <p className="text-sm text-slate-500 mt-2">This may take a few seconds for long images</p>
         </div>
       )}
     </div>
   );
 }
-export function OCRResultReview({ result, onConfirm, onCancel }: { result: OCRResult, onConfirm: (text: string) => void, onCancel: () => void }) {
-  const [editedText, setEditedText] = useState(result.text);
+
+export function OCRResultReview({ result, onConfirm, onCancel }: { result: OCRResult, onConfirm: (shipments: Shipment[]) => void, onCancel: () => void }) {
+  const [extractedShipments, setExtractedShipments] = useState<Shipment[]>(ShipmentExtractor.extract(result.text));
+
+  const updateShipment = (index: number, changes: Partial<Shipment>) => {
+    const next = [...extractedShipments];
+    next[index] = { ...next[index], ...changes };
+    setExtractedShipments(next);
+  };
+
+  const removeShipment = (index: number) => {
+    setExtractedShipments(extractedShipments.filter((_, i) => i !== index));
+  };
+
   return (
-    <div className="space-y-4 bg-white p-4 rounded-lg border shadow-sm">
-      <h3 className="font-bold flex items-center justify-between">Review Results <span>{Math.round(result.confidence)}%</span></h3>
-      <textarea className="w-full h-64 p-3 text-sm border rounded-md font-mono" value={editedText} onChange={(e) => setEditedText(e.target.value)} />
-      <div className="flex gap-3">
-        <Button variant="outline" className="flex-1" onClick={onCancel}><AlertCircle className="w-4 h-4 mr-2" />Discard</Button>
-        <Button className="flex-1" onClick={() => onConfirm(editedText)}><CheckCircle2 className="w-4 h-4 mr-2" />Confirm</Button>
+    <div className="space-y-6 pb-20">
+      <div className="flex items-center justify-between sticky top-0 bg-slate-50 py-2 z-10">
+        <h3 className="font-bold text-lg">Review Extracted Shipments</h3>
+        <span className="bg-primary/10 text-primary px-3 py-1 rounded-full text-xs font-bold">
+          {extractedShipments.length} found
+        </span>
+      </div>
+
+      {extractedShipments.length === 0 ? (
+        <div className="bg-white p-12 rounded-xl border text-center space-y-4">
+          <AlertTriangle className="w-12 h-12 text-yellow-500 mx-auto" />
+          <p className="font-medium">No shipments could be automatically extracted.</p>
+          <Button variant="outline" onClick={onCancel}>Try Another Image</Button>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {extractedShipments.map((s, i) => {
+            const { isValid, warnings } = Validator.validate(s);
+            return (
+              <div key={i} className={`bg-white rounded-xl border-2 p-4 space-y-4 shadow-sm transition-colors ${!isValid ? 'border-yellow-200' : 'border-slate-100'}`}>
+                <div className="flex justify-between items-start">
+                  <div className="flex-1 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <Package className="w-4 h-4 text-slate-400" />
+                      <input
+                        className="font-bold text-lg w-full bg-transparent outline-none focus:border-b border-primary/20"
+                        value={s.customerName}
+                        onChange={(e) => updateShipment(i, { customerName: e.target.value })}
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <Hash className="w-4 h-4 text-slate-400" />
+                      <input
+                        className="text-sm font-mono w-full bg-transparent outline-none focus:border-b border-primary/20"
+                        value={s.awb}
+                        onChange={(e) => updateShipment(i, { awb: e.target.value })}
+                        placeholder="AWB Number"
+                      />
+                    </div>
+
+                    <div className="flex items-start gap-2">
+                      <MapPin className="w-4 h-4 text-slate-400 mt-1 shrink-0" />
+                      <textarea
+                        className="text-sm text-slate-600 w-full bg-transparent outline-none focus:border-b border-primary/20 resize-none"
+                        value={s.address}
+                        onChange={(e) => updateShipment(i, { address: e.target.value })}
+                        rows={2}
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="flex items-center gap-2">
+                        <Phone className="w-4 h-4 text-slate-400" />
+                        <input
+                          className="text-sm w-full bg-transparent outline-none focus:border-b border-primary/20"
+                          value={s.phone}
+                          onChange={(e) => updateShipment(i, { phone: e.target.value })}
+                        />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <CreditCard className="w-4 h-4 text-slate-400" />
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs font-bold text-slate-400">₹</span>
+                          <input
+                            className="text-sm w-full bg-transparent outline-none focus:border-b border-primary/20 font-bold"
+                            value={s.amount || ''}
+                            onChange={(e) => updateShipment(i, { amount: parseFloat(e.target.value) || 0, isCOD: !!e.target.value })}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <Button variant="ghost" size="icon" className="text-slate-300 hover:text-red-500" onClick={() => removeShipment(i)}>
+                    <AlertCircle className="w-5 h-5" />
+                  </Button>
+                </div>
+
+                {warnings.length > 0 && (
+                  <div className="bg-yellow-50 p-2 rounded-lg space-y-1">
+                    {warnings.map((w, wi) => (
+                      <p key={wi} className="text-[10px] text-yellow-700 flex items-center gap-1 font-medium">
+                        <AlertTriangle className="w-3 h-3" /> {w}
+                      </p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="fixed bottom-20 left-4 right-4 flex gap-3">
+        <Button variant="outline" className="flex-1 bg-white h-12 shadow-lg" onClick={onCancel}>
+          Discard All
+        </Button>
+        <Button className="flex-2 h-12 shadow-lg px-8" onClick={() => onConfirm(extractedShipments)}>
+          <CheckCircle2 className="w-5 h-5 mr-2" />
+          Confirm & Import
+        </Button>
       </div>
     </div>
   );
