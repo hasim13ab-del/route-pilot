@@ -7,7 +7,7 @@ import globals from 'globals';
 
 export default [
   {
-    ignores: ['dist', 'node_modules', '*.config.js', 'tailwind.config.js', 'postcss.config.js'],
+    ignores: ['dist', 'node_modules', '*.config.js', 'tailwind.config.js', 'postcss.config.js', 'jest.config.cjs'],
   },
   js.configs.recommended,
   {
@@ -37,6 +37,14 @@ export default [
       ],
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
     },
+  },
+  {
+    files: ['playwright.config.ts', 'e2e/**/*.ts'],
+    languageOptions: {
+      globals: {
+        ...globals.node
+      }
+    }
   },
   {
     files: ['*.config.js', 'tailwind.config.js'],
