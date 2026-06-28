@@ -1,5 +1,5 @@
 import { useState, useCallback, ChangeEvent } from 'react';
-import { Camera, Upload, Loader2, CheckCircle2, AlertCircle, AlertTriangle, Package, MapPin, Phone, CreditCard, Hash } from 'lucide-react';
+import { Camera, Upload, Loader2, CheckCircle2, AlertCircle, AlertTriangle, Package, MapPin, Phone, Hash, Activity } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ImageProcessor } from '@/services/ocr/image-processor';
 import { OCRResult } from '@/services/ocr/ocr.service';
@@ -67,7 +67,7 @@ export function OCRScanner({ onResult }: { onResult: (result: OCRResult) => void
 }
 
 export function OCRResultReview({ result, onConfirm, onCancel }: { result: OCRResult, onConfirm: (shipments: Shipment[]) => void, onCancel: () => void }) {
-  const [extractedShipments, setExtractedShipments] = useState<Shipment[]>(ShipmentExtractor.extract(result.text));
+  const [extractedShipments, setExtractedShipments] = useState<Shipment[]>(ShipmentExtractor.extractFromOCR(result));
 
   const updateShipment = (index: number, changes: Partial<Shipment>) => {
     const next = [...extractedShipments];
@@ -109,26 +109,32 @@ export function OCRResultReview({ result, onConfirm, onCancel }: { result: OCRRe
                         value={s.customerName}
                         onChange={(e) => updateShipment(i, { customerName: e.target.value })}
                       />
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <Hash className="w-4 h-4 text-slate-400" />
-                      <input
-                        className="text-sm font-mono w-full bg-transparent outline-none focus:border-b border-primary/20"
-                        value={s.awb}
-                        onChange={(e) => updateShipment(i, { awb: e.target.value })}
-                        placeholder="AWB Number"
-                      />
+                      {s.priority === 'High' && (
+                        <span className="bg-red-100 text-red-600 text-[10px] px-1.5 py-0.5 rounded font-bold uppercase shrink-0">Priority</span>
+                      )}
                     </div>
 
                     <div className="flex items-start gap-2">
                       <MapPin className="w-4 h-4 text-slate-400 mt-1 shrink-0" />
-                      <textarea
-                        className="text-sm text-slate-600 w-full bg-transparent outline-none focus:border-b border-primary/20 resize-none"
-                        value={s.address}
-                        onChange={(e) => updateShipment(i, { address: e.target.value })}
-                        rows={2}
-                      />
+                      <div className="flex-1 space-y-2">
+                        <textarea
+                          className="text-sm text-slate-600 w-full bg-transparent outline-none focus:border-b border-primary/20 resize-none"
+                          value={s.address}
+                          onChange={(e) => updateShipment(i, { address: e.target.value })}
+                          rows={2}
+                          placeholder="Address"
+                        />
+                        {s.landmark && (
+                          <div className="flex items-center gap-1 text-[11px] text-slate-500 bg-slate-50 p-1 rounded border">
+                            <span className="font-bold shrink-0">LANDMARK:</span>
+                            <input
+                              className="bg-transparent outline-none w-full"
+                              value={s.landmark}
+                              onChange={(e) => updateShipment(i, { landmark: e.target.value })}
+                            />
+                          </div>
+                        )}
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-4">
@@ -138,20 +144,32 @@ export function OCRResultReview({ result, onConfirm, onCancel }: { result: OCRRe
                           className="text-sm w-full bg-transparent outline-none focus:border-b border-primary/20"
                           value={s.phone}
                           onChange={(e) => updateShipment(i, { phone: e.target.value })}
+                          placeholder="Phone Number"
                         />
                       </div>
                       <div className="flex items-center gap-2">
-                        <CreditCard className="w-4 h-4 text-slate-400" />
+                        <Activity className="w-4 h-4 text-slate-400" />
                         <div className="flex items-center gap-1">
-                          <span className="text-xs font-bold text-slate-400">₹</span>
+                          <span className="text-xs font-bold text-slate-400">Delivery:</span>
                           <input
                             className="text-sm w-full bg-transparent outline-none focus:border-b border-primary/20 font-bold"
-                            value={s.amount || ''}
-                            onChange={(e) => updateShipment(i, { amount: parseFloat(e.target.value) || 0, isCOD: !!e.target.value })}
+                            value={s.deliveryCount || 0}
+                            onChange={(e) => updateShipment(i, { deliveryCount: parseInt(e.target.value) || 0 })}
                           />
                         </div>
                       </div>
                     </div>
+
+                    {s.awb && s.awb !== 'No AWB' && (
+                      <div className="flex items-center gap-2">
+                        <Hash className="w-4 h-4 text-slate-400" />
+                        <input
+                          className="text-sm font-mono w-full bg-transparent outline-none focus:border-b border-primary/20"
+                          value={s.awb}
+                          onChange={(e) => updateShipment(i, { awb: e.target.value })}
+                        />
+                      </div>
+                    )}
                   </div>
                   <Button variant="ghost" size="icon" className="text-slate-300 hover:text-red-500" onClick={() => removeShipment(i)}>
                     <AlertCircle className="w-5 h-5" />

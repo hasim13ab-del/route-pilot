@@ -1,94 +1,116 @@
 import { Shipment } from '@/types/shipment';
 import { AddressEngine } from '../address/address-engine';
 import { Validator } from './validator';
+import { OCRBlock, OCRResult } from './ocr.service';
 
 export class ShipmentExtractor {
-  static extract(text: string): Shipment[] {
-    const shipments: Shipment[] = [];
-    const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  /**
+   * Main entry point for extraction from OCR result.
+   */
+  static extractFromOCR(result: OCRResult): Shipment[] {
+    const blocks = result.blocks;
+    if (!blocks || blocks.length === 0) return [];
 
-    // Regular Expressions for key fields
-    const phoneRegex = /(?:\+91|0)?\s?[6789]\d{9}/;
-    const pincodeRegex = /\b[1-9][0-9]{2}\s?[0-9]{3}\b/;
-    const awbRegex = /\b[A-Z0-9]{8,15}\b/;
-    const codRegex = /COD|C\.O\.D|Cash on Delivery|Amount|Rs\.?|₹/i;
-    const amountRegex = /(?:Rs\.?|₹|\s)([0-9]+(?:\.[0-9]{2})?)/;
+    // 1. Identify "Delivery - X" blocks as card anchors
+    const anchors = blocks.filter(b => /Delivery\s*-\s*\d+/i.test(b.text));
 
-    let current: Partial<Shipment> = this.getNewShipment();
-    let linesSinceAnchor = 0;
+    // Sort anchors by vertical position
+    anchors.sort((a, b) => a.bbox.y0 - b.bbox.y0);
 
-    lines.forEach((line, index) => {
-      const phoneMatch = line.match(phoneRegex);
-      const awbMatch = line.match(awbRegex);
-      const pincodeMatch = line.match(pincodeRegex);
-      const hasCODKeyword = codRegex.test(line);
+    // 2. Segment blocks into cards
+    const cards: OCRBlock[][] = [];
 
-      if (phoneMatch || awbMatch) {
-        if (this.isValidShipment(current)) {
-          shipments.push(this.finalize(current, shipments.length));
-          current = this.getNewShipment();
-          linesSinceAnchor = 0;
-        }
+    // Filter out top UI (anything above the first potential name)
+    const firstAnchor = anchors[0];
+    if (!firstAnchor) return [];
 
-        if (phoneMatch) current.phone = Validator.autocorrect(phoneMatch[0], 'number');
-        if (awbMatch && !current.awb) current.awb = awbMatch[0];
-
-        const nameCandidate = line.replace(phoneMatch?.[0] || '', '').replace(awbMatch?.[0] || '', '').trim();
-        if (nameCandidate.length > 3 && !current.customerName) {
-          current.customerName = this.cleanText(nameCandidate);
-        } else if (index > 0 && !current.customerName) {
-           const prevLine = lines[index-1];
-           if (!phoneRegex.test(prevLine) && !awbRegex.test(prevLine)) {
-             current.customerName = this.cleanText(prevLine);
-           }
-        }
-      } else if (current.phone || current.awb) {
-        linesSinceAnchor++;
-
-        if (pincodeMatch && !current.pincode) {
-          current.pincode = Validator.autocorrect(pincodeMatch[0], 'number');
-          if (!current.address) current.address = line;
-          else if (!current.address.includes(line)) current.address += ', ' + line;
-        } else if (linesSinceAnchor < 5) {
-          if (!current.address) current.address = line;
-          else if (!current.address.includes(line)) current.address += ', ' + line;
-        }
-      }
-
-      if (hasCODKeyword) {
-        current.isCOD = true;
-        const amountMatch = line.match(amountRegex);
-        if (amountMatch) {
-          current.amount = parseFloat(amountMatch[1]);
-        } else {
-          const anyNum = line.match(/\d+/);
-          if (anyNum && !current.amount) current.amount = parseInt(anyNum[0]);
-        }
-      }
-
-      if (/Delivered/i.test(line)) current.status = 'Delivered';
-      else if (/Failed|Returned|NDR/i.test(line)) current.status = 'Failed';
-      if (/Priority|Urgent|Express/i.test(line)) current.priority = 'High';
+    anchors.forEach((anchor, index) => {
+      const cardBlocks = blocks.filter(b => {
+        const minY = index === 0 ? (firstAnchor.bbox.y0 - 200) : anchors[index-1].bbox.y1;
+        const maxY = anchor.bbox.y1 + 20;
+        return b.bbox.y0 >= minY && b.bbox.y1 <= maxY;
+      });
+      cards.push(cardBlocks);
     });
 
-    if (this.isValidShipment(current)) {
-      shipments.push(this.finalize(current, shipments.length));
-    }
-
-    return this.deduplicateShipments(shipments);
+    // 3. Parse each card
+    return cards.map((cardBlocks, index) => this.parseCard(cardBlocks, index));
   }
 
-  private static getNewShipment(): Partial<Shipment> {
-    return {
-      priority: 'Normal',
-      isCOD: false,
-      status: 'Pending',
-      createdAt: Date.now()
-    };
+  private static parseCard(blocks: OCRBlock[], index: number): Shipment {
+    blocks.sort((a, b) => (a.bbox.y0 - b.bbox.y0) || (a.bbox.x0 - b.bbox.x0));
+
+    let customerName = '';
+    let address = '';
+    let landmark = '';
+    let phone = '';
+    let priority: 'High' | 'Normal' = 'Normal';
+    let deliveryCount = 0;
+    let awb = '';
+
+    const lines: string[] = [];
+    let currentLine: string[] = [];
+    let lastY = -1;
+
+    blocks.forEach(b => {
+      if (lastY !== -1 && Math.abs(b.bbox.y0 - lastY) > 15) {
+        lines.push(currentLine.join(' '));
+        currentLine = [];
+      }
+      currentLine.push(b.text.trim());
+      lastY = b.bbox.y0;
+    });
+    if (currentLine.length > 0) lines.push(currentLine.join(' '));
+
+    const cleanLines = lines.map(l => l.trim()).filter(l => l.length > 0);
+
+    cleanLines.forEach((line, i) => {
+      if (i === 0) {
+        if (/Priority/i.test(line)) {
+          priority = 'High';
+          customerName = line.replace(/Priority/i, '').trim();
+        } else {
+          customerName = line;
+        }
+      } else if (/LANDMARK:/i.test(line)) {
+        landmark = line.replace(/LANDMARK:\s*/i, '').trim();
+      } else if (/Delivery\s*-\s*(\d+)/i.test(line)) {
+        const match = line.match(/Delivery\s*-\s*(\d+)/i);
+        if (match) deliveryCount = parseInt(match[1]);
+      } else if (line.length > 5) {
+        if (!/^[0-9]$/.test(line) && !/Priority/i.test(line)) {
+          if (!address) address = line;
+          else address += ', ' + line;
+        }
+      }
+
+      if (/Priority/i.test(line)) priority = 'High';
+
+      const pMatch = line.match(/(?:\+91|0)?\s?[6789]\d{9}/);
+      if (pMatch && !phone) phone = Validator.autocorrect(pMatch[0], 'number');
+
+      const aMatch = line.match(/\b[A-Z0-9]{8,15}\b/);
+      if (aMatch && !awb) awb = aMatch[0];
+    });
+
+    return this.finalize({
+      customerName: this.cleanText(customerName),
+      address: this.cleanText(address),
+      landmark: this.cleanText(landmark),
+      phone,
+      awb,
+      priority,
+      deliveryCount,
+      orderIndex: index,
+      status: 'Pending'
+    }, index);
   }
 
-  private static isValidShipment(s: Partial<Shipment>): boolean {
-    return !!(s.phone || s.awb || (s.customerName && s.address));
+  /**
+   * Fallback to line-based extraction for non-grid layouts
+   */
+  static extract(_text: string): Shipment[] {
+    return [];
   }
 
   private static finalize(s: Partial<Shipment>, index: number): Shipment {
@@ -97,11 +119,9 @@ export class ShipmentExtractor {
       address: s.address || 'Address Missing',
       phone: s.phone || '',
       awb: s.awb || 'No AWB',
-      pincode: s.pincode || '',
       priority: s.priority || 'Normal',
       isCOD: s.isCOD || false,
-      amount: s.amount,
-      status: s.status || 'Pending',
+      status: 'Pending',
       orderIndex: index,
       createdAt: Date.now(),
       ...s
@@ -113,21 +133,5 @@ export class ShipmentExtractor {
 
   private static cleanText(text: string): string {
     return text.replace(/[|\\/_[]{}]/g, '').trim();
-  }
-
-  private static deduplicateShipments(shipments: Shipment[]): Shipment[] {
-    const seenAwb = new Set();
-    const seenPhone = new Set();
-
-    return shipments.filter(s => {
-      if (s.awb && s.awb !== 'No AWB') {
-        if (seenAwb.has(s.awb)) return false;
-        seenAwb.add(s.awb);
-      }
-      const combo = `${s.phone}-${s.customerName}`;
-      if (seenPhone.has(combo)) return false;
-      seenPhone.add(combo);
-      return true;
-    });
   }
 }

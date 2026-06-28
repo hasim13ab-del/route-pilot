@@ -10,6 +10,7 @@ export interface Shipment {
   priority: 'High' | 'Normal';
   isCOD: boolean;
   amount?: number;
+  deliveryCount?: number;
   remarks?: string;
   status: 'Pending' | 'Delivered' | 'Failed';
   orderIndex: number;
