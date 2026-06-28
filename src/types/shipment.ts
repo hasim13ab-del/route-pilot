@@ -15,4 +15,11 @@ export interface Shipment {
   status: 'Pending' | 'Delivered' | 'Failed';
   orderIndex: number;
   createdAt: number;
+  confidence?: {
+    customerName?: number;
+    address?: number;
+    phone?: number;
+    awb?: number;
+    overall: number;
+  };
 }

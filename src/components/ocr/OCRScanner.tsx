@@ -1,5 +1,5 @@
-import { useState, useCallback, ChangeEvent } from 'react';
-import { Camera, Upload, Loader2, CheckCircle2, AlertCircle, AlertTriangle, Package, MapPin, Phone, Hash, Activity } from 'lucide-react';
+import { useState, useCallback, ChangeEvent, useEffect } from 'react';
+import { Camera, Upload, Loader2, CheckCircle2, AlertCircle, AlertTriangle, Package, MapPin, Phone, Hash, Activity, Star } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ImageProcessor } from '@/services/ocr/image-processor';
 import { OCRResult } from '@/services/ocr/ocr.service';
@@ -67,7 +67,17 @@ export function OCRScanner({ onResult }: { onResult: (result: OCRResult) => void
 }
 
 export function OCRResultReview({ result, onConfirm, onCancel }: { result: OCRResult, onConfirm: (shipments: Shipment[]) => void, onCancel: () => void }) {
-  const [extractedShipments, setExtractedShipments] = useState<Shipment[]>(ShipmentExtractor.extractFromOCR(result));
+  const [extractedShipments, setExtractedShipments] = useState<Shipment[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const runExtraction = async () => {
+      const res = await ShipmentExtractor.extractFromOCR(result);
+      setExtractedShipments(res);
+      setIsLoading(false);
+    };
+    runExtraction();
+  }, [result]);
 
   const updateShipment = (index: number, changes: Partial<Shipment>) => {
     const next = [...extractedShipments];
@@ -78,6 +88,15 @@ export function OCRResultReview({ result, onConfirm, onCancel }: { result: OCRRe
   const removeShipment = (index: number) => {
     setExtractedShipments(extractedShipments.filter((_, i) => i !== index));
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center p-12 bg-white rounded-xl border">
+        <Loader2 className="w-10 h-10 text-primary animate-spin mb-4" />
+        <p className="font-bold">Structuring Data...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 pb-20">
@@ -110,7 +129,9 @@ export function OCRResultReview({ result, onConfirm, onCancel }: { result: OCRRe
                         onChange={(e) => updateShipment(i, { customerName: e.target.value })}
                       />
                       {s.priority === 'High' && (
-                        <span className="bg-red-100 text-red-600 text-[10px] px-1.5 py-0.5 rounded font-bold uppercase shrink-0">Priority</span>
+                        <span className="bg-red-50 text-red-600 text-[10px] px-1.5 py-0.5 rounded font-black uppercase tracking-tighter flex items-center gap-0.5">
+                          <Star className="w-2 h-2 fill-red-600" /> Priority
+                        </span>
                       )}
                     </div>
 
@@ -133,6 +154,11 @@ export function OCRResultReview({ result, onConfirm, onCancel }: { result: OCRRe
                               onChange={(e) => updateShipment(i, { landmark: e.target.value })}
                             />
                           </div>
+                        )}
+                        {s.locality && (
+                           <span className="text-[10px] font-bold text-primary uppercase bg-primary/5 px-2 py-0.5 rounded border border-primary/10 inline-block">
+                             {s.locality}
+                           </span>
                         )}
                       </div>
                     </div>

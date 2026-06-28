@@ -27,7 +27,7 @@ function App() {
   ), [shipments, search])
 
   const handleOptimize = async () => {
-    const optimized = RouteOptimizer.optimize(shipments)
+    const optimized = await RouteOptimizer.optimize(shipments)
     await ShipmentService.updateOrder(optimized.map(s => s.id!))
   }
 

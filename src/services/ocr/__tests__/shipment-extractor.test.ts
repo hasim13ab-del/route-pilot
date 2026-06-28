@@ -2,7 +2,7 @@ import { ShipmentExtractor } from '../shipment-extractor';
 import { OCRResult } from '../ocr.service';
 
 describe('ShipmentExtractor', () => {
-  it('should extract exactly 6 shipments from the jobsheet screenshot data', () => {
+  it('should extract exactly 6 shipments from the jobsheet screenshot data', async () => {
     const mockOCRResult: OCRResult = {
       text: '',
       confidence: 90,
@@ -47,7 +47,10 @@ describe('ShipmentExtractor', () => {
       ]
     };
 
-    const shipments = ShipmentExtractor.extractFromOCR(mockOCRResult);
+    // Construct raw text to simulate how extractor combines them for AI cleanup
+    mockOCRResult.text = mockOCRResult.blocks.map(b => b.text).join('\n');
+
+    const shipments = await ShipmentExtractor.extractFromOCR(mockOCRResult);
 
     expect(shipments.length).toBe(6);
     expect(shipments[0].customerName).toBe('Ashraf Talukdar');
