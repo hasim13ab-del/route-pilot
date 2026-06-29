@@ -5,17 +5,22 @@ export interface RouteStop extends Shipment {
   coords?: { lat: number; lon: number };
 }
 
-export class RouteOptimizer {
-  /**
-   * Optimizes the delivery route using a multi-stage approach:
-   * 1. Priority-First: High priority items are delivered first.
-   * 2. Area Clustering: Shipments are grouped by locality.
-   * 3. Nearest Neighbor: Within each group/cluster, stops are ordered by shortest distance.
-   */
-  static async optimize(shipments: Shipment[]): Promise<Shipment[]> {
-    if (shipments.length === 0) return [];
+export interface RouteMetrics {
+  totalDistance: number; // in km
+  totalDuration: number; // in minutes
+  fuelEstimate: number; // in liters
+}
 
-    // 1. Fetch all coordinates (cached in IndexedDB)
+export class RouteOptimizer {
+  static FUEL_EFFICIENCY = 0.08; // 8L per 100km (typical bike/small van)
+  static AVG_SPEED = 30; // 30 km/h avg speed in logistics
+
+  static async optimize(shipments: Shipment[]): Promise<{ optimized: Shipment[], metrics: RouteMetrics }> {
+    if (shipments.length === 0) {
+      return { optimized: [], metrics: { totalDistance: 0, totalDuration: 0, fuelEstimate: 0 } };
+    }
+
+    // 1. Fetch all coordinates
     const stops: RouteStop[] = await Promise.all(
       shipments.map(async (s) => ({
         ...s,
@@ -23,94 +28,111 @@ export class RouteOptimizer {
       }))
     );
 
-    // 2. Split by Priority
-    const highPriority = stops.filter(s => s.priority === 'High');
-    const normalPriority = stops.filter(s => s.priority === 'Normal');
+    // 2. Separate by Priority
+    const high = stops.filter(s => s.priority === 'High');
+    const normal = stops.filter(s => s.priority === 'Normal');
 
-    // 3. Optimize each priority group
-    const optimizedHigh = this.optimizeGroup(highPriority);
-    const optimizedNormal = this.optimizeGroup(normalPriority);
+    // 3. Optimize each group with NN + 2-opt
+    const optHigh = this.optimizeGroup(high);
+    const optNormal = this.optimizeGroup(normal, optHigh[optHigh.length - 1]?.coords);
 
-    const result = [...optimizedHigh, ...optimizedNormal];
-
-    // 4. Update order indices
-    return result.map((s, i) => ({
+    const optimized = [...optHigh, ...optNormal].map((s, i) => ({
       ...s,
       orderIndex: i
     }));
+
+    // 4. Calculate metrics
+    const metrics = this.calculateMetrics(optimized);
+
+    return { optimized, metrics };
   }
 
-  private static optimizeGroup(group: RouteStop[]): RouteStop[] {
-    if (group.length === 0) return [];
+  private static optimizeGroup(group: RouteStop[], startCoords?: { lat: number; lon: number }): RouteStop[] {
+    if (group.length <= 1) return group;
 
-    // Group by locality
-    const clusters: Record<string, RouteStop[]> = {};
-    group.forEach(s => {
-      const key = s.locality || 'Unknown';
-      if (!clusters[key]) clusters[key] = [];
-      clusters[key].push(s);
-    });
+    // Nearest Neighbor initialization
+    let current = this.nearestNeighbor(group, startCoords);
 
-    // Order clusters: Sort localities by their average coordinates to keep clusters together
-    const sortedLocalities = Object.keys(clusters).sort((a, b) => {
-      const centerA = this.getClusterCenter(clusters[a]);
-      const centerB = this.getClusterCenter(clusters[b]);
-      if (!centerA || !centerB) return 0;
-      return centerA.lat - centerB.lat || centerA.lon - centerB.lon;
-    });
-
-    const optimized: RouteStop[] = [];
-
-    for (const loc of sortedLocalities) {
-      const cluster = clusters[loc];
-      // Sort within cluster using Nearest Neighbor
-      optimized.push(...this.nearestNeighbor(cluster, optimized[optimized.length - 1]?.coords));
+    // 2-opt local search improvement
+    let improved = true;
+    while (improved) {
+      improved = false;
+      for (let i = 0; i < current.length - 1; i++) {
+        for (let k = i + 1; k < current.length; k++) {
+          const newRoute = this.twoOptSwap(current, i, k);
+          if (this.calculateRouteDistance(newRoute) < this.calculateRouteDistance(current)) {
+            current = newRoute;
+            improved = true;
+          }
+        }
+      }
     }
 
-    return optimized;
+    return current;
   }
 
-  private static getClusterCenter(cluster: RouteStop[]): { lat: number; lon: number } | null {
-    const coords = cluster.filter(s => s.coords).map(s => s.coords!);
-    if (coords.length === 0) return null;
-    return {
-      lat: coords.reduce((acc, c) => acc + c.lat, 0) / coords.length,
-      lon: coords.reduce((acc, c) => acc + c.lon, 0) / coords.length
-    };
-  }
-
-  private static nearestNeighbor(stops: RouteStop[], startCoords?: { lat: number; lon: number }): RouteStop[] {
+  private static nearestNeighbor(stops: RouteStop[], start?: { lat: number; lon: number }): RouteStop[] {
     const remaining = [...stops];
     const ordered: RouteStop[] = [];
-    let currentPos = startCoords || this.getClusterCenter(stops);
+    let currentPos = start || { lat: stops[0].coords?.lat || 0, lon: stops[0].coords?.lon || 0 };
 
     while (remaining.length > 0) {
-      let nearestIdx = 0;
-      if (currentPos) {
-        let minDist = Infinity;
-        remaining.forEach((stop, idx) => {
-          if (stop.coords) {
-            const d = this.calculateDistance(currentPos!, stop.coords);
-            if (d < minDist) {
-              minDist = d;
-              nearestIdx = idx;
-            }
+      let bestIdx = 0;
+      let minDist = Infinity;
+
+      remaining.forEach((stop, idx) => {
+        if (stop.coords) {
+          const d = this.calculateDistance(currentPos, stop.coords);
+          if (d < minDist) {
+            minDist = d;
+            bestIdx = idx;
           }
-        });
-      }
+        }
+      });
 
-      const next = remaining.splice(nearestIdx, 1)[0];
+      const next = remaining.splice(bestIdx, 1)[0];
       ordered.push(next);
-      if (next.coords) {
-        currentPos = next.coords;
-      }
+      if (next.coords) currentPos = next.coords;
     }
-
     return ordered;
   }
 
+  private static twoOptSwap(route: RouteStop[], i: number, k: number): RouteStop[] {
+    const newRoute = route.slice(0, i);
+    const reversedSection = route.slice(i, k + 1).reverse();
+    return [...newRoute, ...reversedSection, ...route.slice(k + 1)];
+  }
+
+  private static calculateRouteDistance(route: RouteStop[]): number {
+    let dist = 0;
+    for (let i = 0; i < route.length - 1; i++) {
+      if (route[i].coords && route[i+1].coords) {
+        dist += this.calculateDistance(route[i].coords!, route[i+1].coords!);
+      }
+    }
+    return dist;
+  }
+
   private static calculateDistance(p1: { lat: number; lon: number }, p2: { lat: number; lon: number }): number {
-    // Simple Euclidean distance for local optimization (Haversine not strictly needed for short distances)
-    return Math.sqrt(Math.pow(p1.lat - p2.lat, 2) + Math.pow(p1.lon - p2.lon, 2));
+    const R = 6371; // Earth radius in km
+    const dLat = (p2.lat - p1.lat) * Math.PI / 180;
+    const dLon = (p2.lon - p1.lon) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(p1.lat * Math.PI / 180) * Math.cos(p2.lat * Math.PI / 180) *
+              Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  }
+
+  private static calculateMetrics(route: Shipment[]): RouteMetrics {
+    const totalDistance = this.calculateRouteDistance(route as RouteStop[]);
+    const totalDuration = (totalDistance / this.AVG_SPEED) * 60; // minutes
+    const fuelEstimate = (totalDistance / 100) * (this.FUEL_EFFICIENCY * 100);
+
+    return {
+      totalDistance: parseFloat(totalDistance.toFixed(2)),
+      totalDuration: Math.round(totalDuration),
+      fuelEstimate: parseFloat(fuelEstimate.toFixed(2))
+    };
   }
 }

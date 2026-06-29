@@ -6,10 +6,10 @@ test('app loads and navigates', async ({ page }) => {
 
   // Verify tabs
   await page.click('nav button:nth-child(2)'); // Map
-  await expect(page.locator('text=Live Route Map')).toBeVisible();
+  await expect(page.locator('text=Navigate All')).toBeVisible();
 
   await page.click('nav button:nth-child(3)'); // Stats
-  await expect(page.locator('text=Total')).toBeVisible();
+  await expect(page.locator('text=Total Shipments')).toBeVisible();
 
   await page.click('nav button:nth-child(4)'); // Settings
   await expect(page.locator('text=PWA Status')).toBeVisible();
