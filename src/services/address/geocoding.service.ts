@@ -6,23 +6,40 @@ export class GeocodingService {
     if (cached) return { lat: cached.lat, lon: cached.lon };
 
     try {
-      const response = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(address)}&limit=1`);
-      const data = await response.json();
+      // 1. Try with Full Address
+      let coords = await this.fetchFromPhoton(address);
 
-      if (data.features && data.features.length > 0) {
-        const [lon, lat] = data.features[0].geometry.coordinates;
+      // 2. Fallback: If full address fails, try stripping House No/Road
+      if (!coords) {
+        const fallbackAddress = address.split(',').slice(2).join(',').trim();
+        if (fallbackAddress) {
+           coords = await this.fetchFromPhoton(fallbackAddress);
+        }
+      }
+
+      if (coords) {
         await db.geoCache.put({
           address,
-          lat,
-          lon,
+          lat: coords.lat,
+          lon: coords.lon,
           timestamp: Date.now()
         });
-        return { lat, lon };
+        return coords;
       }
     } catch (error) {
       console.error('Geocoding error:', error);
     }
 
+    return null;
+  }
+
+  private static async fetchFromPhoton(query: string): Promise<{ lat: number; lon: number } | null> {
+    const response = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=1`);
+    const data = await response.json();
+    if (data.features && data.features.length > 0) {
+      const [lon, lat] = data.features[0].geometry.coordinates;
+      return { lat, lon };
+    }
     return null;
   }
 }
