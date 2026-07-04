@@ -1,9 +1,9 @@
 import { useState, useCallback, ChangeEvent, useEffect } from 'react';
-import { Camera, Upload, Loader2, CheckCircle2, AlertCircle, AlertTriangle, Package, MapPin, Phone, Hash, Activity, Star } from 'lucide-react';
+import { Camera, Upload, Loader2, CheckCircle2, AlertCircle, AlertTriangle, Package, MapPin, Phone, Hash, Activity, Star, Cpu, ShieldAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ImageProcessor } from '@/services/ocr/image-processor';
 import { OCRResult } from '@/services/ocr/ocr.service';
-import { ShipmentExtractor } from '@/services/ocr/shipment-extractor';
+import { ShipmentExtractor, ExtractionStrategy } from '@/services/ocr/shipment-extractor';
 import { Validator } from '@/services/ocr/validator';
 import { Shipment } from '@/types/shipment';
 
@@ -68,12 +68,14 @@ export function OCRScanner({ onResult }: { onResult: (result: OCRResult) => void
 
 export function OCRResultReview({ result, onConfirm, onCancel }: { result: OCRResult, onConfirm: (shipments: Shipment[]) => void, onCancel: () => void }) {
   const [extractedShipments, setExtractedShipments] = useState<Shipment[]>([]);
+  const [strategy, setStrategy] = useState<ExtractionStrategy | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     const runExtraction = async () => {
-      const res = await ShipmentExtractor.extractFromOCR(result);
-      setExtractedShipments(res);
+      const { shipments, strategy: s } = await ShipmentExtractor.extractFromOCR(result);
+      setExtractedShipments(shipments);
+      setStrategy(s);
       setIsLoading(false);
     };
     runExtraction();
@@ -81,7 +83,7 @@ export function OCRResultReview({ result, onConfirm, onCancel }: { result: OCRRe
 
   const updateShipment = (index: number, changes: Partial<Shipment>) => {
     const next = [...extractedShipments];
-    next[index] = { ...next[index], ...changes };
+    next[index] = { ...next[index], ...changes } as Shipment;
     setExtractedShipments(next);
   };
 
@@ -93,18 +95,30 @@ export function OCRResultReview({ result, onConfirm, onCancel }: { result: OCRRe
     return (
       <div className="flex flex-col items-center justify-center p-12 bg-white rounded-xl border">
         <Loader2 className="w-10 h-10 text-primary animate-spin mb-4" />
-        <p className="font-bold">Structuring Data...</p>
+        <p className="font-bold">Structuring Data with AI...</p>
       </div>
     );
   }
 
   return (
     <div className="space-y-6 pb-20">
-      <div className="flex items-center justify-between sticky top-0 bg-slate-50 py-2 z-10">
-        <h3 className="font-bold text-lg">Review Extracted Shipments</h3>
-        <span className="bg-primary/10 text-primary px-3 py-1 rounded-full text-xs font-bold">
-          {extractedShipments.length} found
-        </span>
+      <div className="flex flex-col gap-2 sticky top-0 bg-slate-50 py-2 z-10">
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-lg text-slate-800">Review Data</h3>
+          <span className="bg-primary/10 text-primary px-3 py-1 rounded-full text-xs font-bold">
+            {extractedShipments.length} shipments
+          </span>
+        </div>
+
+        {strategy === 'Gemini-AI' ? (
+          <div className="flex items-center gap-1.5 text-[10px] font-bold text-green-600 bg-green-50 px-2 py-1 rounded border border-green-100 w-fit">
+            <Cpu className="w-3 h-3" /> Gemini 1.5 Flash Active
+          </div>
+        ) : (
+          <div className="flex items-center gap-1.5 text-[10px] font-bold text-orange-600 bg-orange-50 px-2 py-1 rounded border border-orange-100 w-fit">
+            <ShieldAlert className="w-3 h-3" /> Local Parser (AI Key Missing)
+          </div>
+        )}
       </div>
 
       {extractedShipments.length === 0 ? (
@@ -155,11 +169,6 @@ export function OCRResultReview({ result, onConfirm, onCancel }: { result: OCRRe
                             />
                           </div>
                         )}
-                        {s.locality && (
-                           <span className="text-[10px] font-bold text-primary uppercase bg-primary/5 px-2 py-0.5 rounded border border-primary/10 inline-block">
-                             {s.locality}
-                           </span>
-                        )}
                       </div>
                     </div>
 
@@ -186,7 +195,7 @@ export function OCRResultReview({ result, onConfirm, onCancel }: { result: OCRRe
                       </div>
                     </div>
 
-                    {s.awb && s.awb !== 'No AWB' && (
+                    {s.awb && (
                       <div className="flex items-center gap-2">
                         <Hash className="w-4 h-4 text-slate-400" />
                         <input

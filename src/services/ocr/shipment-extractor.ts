@@ -4,13 +4,23 @@ import { OCRCorrectionService } from './ocr-correction.service';
 import { AddressEngine } from '../address/address-engine';
 import { Shipment } from '@/types/shipment';
 
+export type ExtractionStrategy = 'Gemini-AI' | 'Local-Fallback';
+
+export interface ExtractionResult {
+  shipments: Shipment[];
+  strategy: ExtractionStrategy;
+}
+
 export class ShipmentExtractor {
-  static async extractFromOCR(result: OCRResult): Promise<Shipment[]> {
+  static async extractFromOCR(result: OCRResult): Promise<ExtractionResult> {
+    let strategy: ExtractionStrategy = 'Gemini-AI';
+
     // 1. Attempt Gemini segmentation first
     let rawShipments = await GeminiService.segmentAndExtract(result.text);
 
     // 2. Fallback to Spatial Deterministic Segmentation if Gemini fails/missing
     if (rawShipments.length === 0) {
+      strategy = 'Local-Fallback';
       rawShipments = this.spatialSegmentation(result.blocks);
     }
 
@@ -43,7 +53,10 @@ export class ShipmentExtractor {
       } as Shipment;
     });
 
-    return this.deduplicate(shipments);
+    return {
+      shipments: this.deduplicate(shipments),
+      strategy
+    };
   }
 
   /**
@@ -51,8 +64,6 @@ export class ShipmentExtractor {
    */
   private static spatialSegmentation(blocks: OCRBlock[]): Partial<Shipment>[] {
     const shipments: Partial<Shipment>[] = [];
-
-    // Group blocks into cards using "Delivery -" as the anchor for the bottom of a card
     let currentCardBlocks: OCRBlock[] = [];
 
     blocks.forEach(block => {
@@ -76,39 +87,30 @@ export class ShipmentExtractor {
 
     if (textLines.length === 0) return shipment;
 
-    // 1. Identify Name (First line that isn't Priority or noise)
     let nameIdx = textLines.findIndex(l => !/Priority|Jobsheet|Search/i.test(l));
     if (nameIdx !== -1) {
       shipment.customerName = textLines[nameIdx];
     }
 
-    // 2. Extract specific patterns
     textLines.forEach(line => {
       const upLine = line.toUpperCase();
-
       if (upLine.includes('PRIORITY')) shipment.priority = 'High';
-
       const phoneMatch = line.match(/\b\d{10}\b/);
       if (phoneMatch && !shipment.phone) shipment.phone = phoneMatch[0];
-
       const awbMatch = line.match(/\b\d{12,15}\b/);
       if (awbMatch && !shipment.awb) shipment.awb = awbMatch[0];
-
       if (upLine.includes('DELIVERY -')) {
         const dMatch = line.match(/(\d+)/);
         if (dMatch) shipment.deliveryCount = parseInt(dMatch[1]);
       }
-
       if (upLine.includes('LANDMARK:')) {
         shipment.landmark = line.replace(/LANDMARK:\s*/i, '').trim();
       }
-
       if (upLine.includes('COD') || upLine.includes('CASH ON DELIVERY')) {
         shipment.isCOD = true;
       }
     });
 
-    // 3. Heuristic Address: Everything after name and before Landmark/Delivery
     const addressLines = textLines.slice((nameIdx === -1 ? 0 : nameIdx) + 1)
       .filter(l => !/Priority|Delivery -|LANDMARK:|COD|C\.O\.D/i.test(l) && !/\b\d{10}\b/.test(l) && !/\b\d{12,15}\b/.test(l));
 

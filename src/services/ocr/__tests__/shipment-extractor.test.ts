@@ -42,15 +42,18 @@ describe('ShipmentExtractor', () => {
 
         // Card 6
         { text: 'Nurul Hoque', confidence: 99, bbox: { x0: 50, y0: 1550, x1: 300, y1: 1580 } },
+        { text: '9876543210', confidence: 99, bbox: { x0: 50, y0: 1560, x1: 150, y1: 1570 } },
+        { text: '1234567890123', confidence: 99, bbox: { x0: 50, y0: 1570, x1: 150, y1: 1580 } },
+        { text: 'COD', confidence: 99, bbox: { x0: 50, y0: 1580, x1: 100, y1: 1590 } },
         { text: '191, Hindu block post office, Doboka', confidence: 95, bbox: { x0: 50, y0: 1590, x1: 750, y1: 1610 } },
         { text: 'Delivery - 1', confidence: 99, bbox: { x0: 130, y0: 1710, x1: 300, y1: 1730 } },
       ]
     };
 
-    // Construct raw text to simulate how extractor combines them for AI cleanup
     mockOCRResult.text = mockOCRResult.blocks.map(b => b.text).join('\n');
 
-    const shipments = await ShipmentExtractor.extractFromOCR(mockOCRResult);
+    const result = await ShipmentExtractor.extractFromOCR(mockOCRResult);
+    const shipments = result.shipments;
 
     expect(shipments.length).toBe(6);
     expect(shipments[0].customerName).toBe('Ashraf Talukdar');
@@ -65,6 +68,8 @@ describe('ShipmentExtractor', () => {
     expect(shipments[3].deliveryCount).toBe(4);
 
     expect(shipments[5].customerName).toBe('Nurul Hoque');
-    expect(shipments[5].address).toContain('191, Hindu block post office');
+    expect(shipments[5].phone).toBe('9876543210');
+    expect(shipments[5].awb).toBe('1234567890123');
+    expect(shipments[5].isCOD).toBe(true);
   });
 });
