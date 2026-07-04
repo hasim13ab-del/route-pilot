@@ -14,8 +14,8 @@ export class RoutePilotDatabase extends Dexie {
 
   constructor() {
     super('RoutePilotDB');
-    this.version(2).stores({
-      shipments: '++id, customerName, phone, locality, status, priority, orderIndex, createdAt',
+    this.version(3).stores({
+      shipments: '++id, customerName, locality, status, priority, orderIndex, createdAt',
       geoCache: 'address, timestamp'
     });
   }

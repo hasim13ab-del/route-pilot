@@ -37,16 +37,15 @@ export class GeminiService {
         CRITICAL RULES:
         1. SEGMENTATION: The text contains MULTIPLE shipments. Identify boundaries.
         2. CUSTOMER NAME: Always the first valid name. NEVER use address lines or landmarks as names.
-        3. DELIVERY COUNT: Extract exactly as seen (e.g. "Delivery - 1" -> 1).
-        4. ADDRESS GRANULARITY: Split address into houseNo, road, village, landmark, town, district, state, pincode.
-        5. IGNORE UI: Skip headers like "Pending", "My Route", "SOS", "Search", "Jobsheet".
-        6. REGIONAL: Focus on Assam and Nagaland localities.
-        7. AWB: Extract 12-15 digit tracking numbers.
-        8. PHONE: Extract 10 digit numbers.
-        9. COD: Check for "COD", "Cash on Delivery" or amount.
+        3. ADDRESS GRANULARITY: Split address into houseNo, road, village, landmark, town, district, state, pincode.
+        4. IGNORE UI: Skip headers like "Pending", "My Route", "SOS", "Search", "Jobsheet", "Completed", "Failed", "All Shipments", "Priority Shipments".
+        5. REGIONAL: Focus on Assam and Nagaland localities.
+        6. AWB: Extract 12-15 digit tracking numbers.
+        7. COD: Check for "COD", "Cash on Delivery" or amount.
+        8. REMOVE PHONE/DELIVERY: Do NOT extract phone numbers or delivery counts.
 
         Return ONLY a valid JSON array of shipment objects.
-        Fields: customerName, phone, deliveryCount, houseNo, road, village, landmark, town, district, state, pincode, awb, isCOD, amount, priority, confidence (object with field scores 0-1).
+        Fields: customerName, houseNo, road, village, landmark, town, district, state, pincode, awb, isCOD, amount, priority, confidence (object with field scores 0-1).
 
         OCR TEXT:
         ${ocrText}

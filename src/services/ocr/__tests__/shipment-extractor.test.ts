@@ -59,16 +59,13 @@ describe('ShipmentExtractor', () => {
     expect(shipments[0].customerName).toBe('Ashraf Talukdar');
     expect(shipments[0].priority).toBe('High');
     expect(shipments[0].landmark).toBe('Masjid Al-Huda');
-    expect(shipments[0].deliveryCount).toBe(1);
 
     expect(shipments[1].customerName).toBe('SABIR AHMED');
     expect(shipments[1].priority).toBe('High');
 
     expect(shipments[3].customerName).toBe('Affan Alom');
-    expect(shipments[3].deliveryCount).toBe(4);
 
     expect(shipments[5].customerName).toBe('Nurul Hoque');
-    expect(shipments[5].phone).toBe('9876543210');
     expect(shipments[5].awb).toBe('1234567890123');
     expect(shipments[5].isCOD).toBe(true);
   });

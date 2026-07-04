@@ -27,8 +27,7 @@ function App() {
 
   const filtered = useMemo(() => shipments.filter(s =>
     s.customerName.toLowerCase().includes(search.toLowerCase()) ||
-    (s.awb && s.awb.toLowerCase().includes(search.toLowerCase())) ||
-    s.phone.includes(search)
+    (s.awb && s.awb.toLowerCase().includes(search.toLowerCase()))
   ), [shipments, search])
 
   // Trigger metrics update when shipments or status changes
@@ -118,7 +117,7 @@ function App() {
                 </div>
                 <ShipmentList
                   shipments={filtered}
-                  onStatusChange={(id: number, s: Shipment['status']) => ShipmentService.update(id, {status:s})}
+                  onStatusChange={(id: number, s: Shipment['status'], remark?: string) => ShipmentService.update(id, {status:s, remark})}
                   onDelete={(id: number) => ShipmentService.delete(id)}
                   onReorder={(ids: number[]) => ShipmentService.updateOrder(ids)}
                   onSelect={(id: number) => {

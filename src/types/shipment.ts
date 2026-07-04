@@ -2,8 +2,6 @@ export interface Shipment {
   id?: number;
   awb?: string;
   customerName: string;
-  phone: string;
-  deliveryCount: number;
 
   // Granular Address Fields
   houseNo?: string;
@@ -22,7 +20,7 @@ export interface Shipment {
   priority: 'High' | 'Normal';
   isCOD: boolean;
   amount?: number;
-  remarks?: string;
+  remark?: string;
   status: 'Pending' | 'Delivered' | 'Failed';
   orderIndex: number;
   createdAt: number;

@@ -1,5 +1,5 @@
 import { useState, useCallback, ChangeEvent, useEffect } from 'react';
-import { Camera, Upload, Loader2, CheckCircle2, AlertCircle, AlertTriangle, Package, MapPin, Phone, Hash, Activity, Star, Cpu, ShieldAlert } from 'lucide-react';
+import { Camera, Upload, Loader2, CheckCircle2, AlertCircle, AlertTriangle, Package, MapPin, Star, Cpu, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ImageProcessor } from '@/services/ocr/image-processor';
 import { OCRResult } from '@/services/ocr/ocr.service';
@@ -95,7 +95,7 @@ export function OCRResultReview({ result, onConfirm, onCancel }: { result: OCRRe
     return (
       <div className="flex flex-col items-center justify-center p-12 bg-white rounded-xl border">
         <Loader2 className="w-10 h-10 text-primary animate-spin mb-4" />
-        <p className="font-bold">Structuring Data with AI...</p>
+        <p className="font-bold">Structuring Data...</p>
       </div>
     );
   }
@@ -110,15 +110,12 @@ export function OCRResultReview({ result, onConfirm, onCancel }: { result: OCRRe
           </span>
         </div>
 
-        {strategy === 'Gemini-AI' ? (
-          <div className="flex items-center gap-1.5 text-[10px] font-bold text-green-600 bg-green-50 px-2 py-1 rounded border border-green-100 w-fit">
-            <Cpu className="w-3 h-3" /> Gemini 1.5 Flash Active
-          </div>
-        ) : (
-          <div className="flex items-center gap-1.5 text-[10px] font-bold text-orange-600 bg-orange-50 px-2 py-1 rounded border border-orange-100 w-fit">
-            <ShieldAlert className="w-3 h-3" /> Local Parser (AI Key Missing)
-          </div>
-        )}
+        <div className={`flex items-center gap-1.5 text-[10px] font-bold px-2 py-1 rounded border w-fit ${
+          strategy === 'Gemini-AI' ? 'text-green-600 bg-green-50 border-green-100' : 'text-slate-600 bg-slate-100 border-slate-200'
+        }`}>
+          {strategy === 'Gemini-AI' ? <Cpu className="w-3 h-3" /> : <ShieldCheck className="w-3 h-3" />}
+          {strategy === 'Gemini-AI' ? 'Gemini 1.5 Flash Active' : 'Offline OCR Mode'}
+        </div>
       </div>
 
       {extractedShipments.length === 0 ? (
@@ -172,32 +169,9 @@ export function OCRResultReview({ result, onConfirm, onCancel }: { result: OCRRe
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="flex items-center gap-2">
-                        <Phone className="w-4 h-4 text-slate-400" />
-                        <input
-                          className="text-sm w-full bg-transparent outline-none focus:border-b border-primary/20"
-                          value={s.phone}
-                          onChange={(e) => updateShipment(i, { phone: e.target.value })}
-                          placeholder="Phone Number"
-                        />
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Activity className="w-4 h-4 text-slate-400" />
-                        <div className="flex items-center gap-1">
-                          <span className="text-xs font-bold text-slate-400">Delivery:</span>
-                          <input
-                            className="text-sm w-full bg-transparent outline-none focus:border-b border-primary/20 font-bold"
-                            value={s.deliveryCount || 0}
-                            onChange={(e) => updateShipment(i, { deliveryCount: parseInt(e.target.value) || 0 })}
-                          />
-                        </div>
-                      </div>
-                    </div>
-
                     {s.awb && (
                       <div className="flex items-center gap-2">
-                        <Hash className="w-4 h-4 text-slate-400" />
+                         <span className="text-[10px] font-mono text-slate-400">AWB:</span>
                         <input
                           className="text-sm font-mono w-full bg-transparent outline-none focus:border-b border-primary/20"
                           value={s.awb}

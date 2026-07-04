@@ -4,7 +4,7 @@ import { OCRCorrectionService } from './ocr-correction.service';
 import { AddressEngine } from '../address/address-engine';
 import { Shipment } from '@/types/shipment';
 
-export type ExtractionStrategy = 'Gemini-AI' | 'Local-Fallback';
+export type ExtractionStrategy = 'Gemini-AI' | 'Offline-OCR';
 
 export interface ExtractionResult {
   shipments: Shipment[];
@@ -14,13 +14,10 @@ export interface ExtractionResult {
 export class ShipmentExtractor {
   static async extractFromOCR(result: OCRResult): Promise<ExtractionResult> {
     let strategy: ExtractionStrategy = 'Gemini-AI';
-
-    // 1. Attempt Gemini segmentation first
     let rawShipments = await GeminiService.segmentAndExtract(result.text);
 
-    // 2. Fallback to Spatial Deterministic Segmentation if Gemini fails/missing
     if (rawShipments.length === 0) {
-      strategy = 'Local-Fallback';
+      strategy = 'Offline-OCR';
       rawShipments = this.spatialSegmentation(result.blocks);
     }
 
@@ -30,8 +27,6 @@ export class ShipmentExtractor {
 
       return {
         customerName: corrected.customerName || 'Unknown',
-        phone: corrected.phone || '',
-        deliveryCount: corrected.deliveryCount || 1,
         awb: corrected.awb,
         houseNo: corrected.houseNo,
         road: corrected.road,
@@ -59,22 +54,26 @@ export class ShipmentExtractor {
     };
   }
 
-  /**
-   * segments shipments based on "Delivery - X" markers and vertical proximity.
-   */
   private static spatialSegmentation(blocks: OCRBlock[]): Partial<Shipment>[] {
     const shipments: Partial<Shipment>[] = [];
     let currentCardBlocks: OCRBlock[] = [];
 
     blocks.forEach(block => {
-      currentCardBlocks.push(block);
-      if (block.text.toUpperCase().includes('DELIVERY -')) {
-        shipments.push(this.parseBlocksAsShipment(currentCardBlocks));
-        currentCardBlocks = [];
+      const text = block.text.trim();
+      const upText = text.toUpperCase();
+      if (/Pending|Completed|Failed|Search|Shipments|My Route|SOS|Jobsheet/i.test(text)) return;
+
+      const isSegmentMarker = upText.includes('PRIORITY') || upText.includes('DELIVERY -');
+
+      if (isSegmentMarker && currentCardBlocks.length > 2) {
+         shipments.push(this.parseBlocksAsShipment(currentCardBlocks));
+         currentCardBlocks = [block];
+      } else {
+         currentCardBlocks.push(block);
       }
     });
 
-    if (currentCardBlocks.length > 3) {
+    if (currentCardBlocks.length > 1) {
       shipments.push(this.parseBlocksAsShipment(currentCardBlocks));
     }
 
@@ -83,26 +82,22 @@ export class ShipmentExtractor {
 
   private static parseBlocksAsShipment(blocks: OCRBlock[]): Partial<Shipment> {
     const shipment: Partial<Shipment> = { priority: 'Normal', isCOD: false };
-    const textLines = blocks.map(b => b.text.trim()).filter(Boolean);
+    const textLines = blocks.map(b => b.text.trim()).filter(Boolean).filter(l => !l.toUpperCase().includes('DELIVERY -'));
 
     if (textLines.length === 0) return shipment;
 
-    let nameIdx = textLines.findIndex(l => !/Priority|Jobsheet|Search/i.test(l));
-    if (nameIdx !== -1) {
-      shipment.customerName = textLines[nameIdx];
-    }
+    let nameIdx = textLines.findIndex(l => !l.toUpperCase().includes('PRIORITY'));
+    if (nameIdx === -1) nameIdx = 0;
+    shipment.customerName = textLines[nameIdx] || 'Unknown';
 
     textLines.forEach(line => {
       const upLine = line.toUpperCase();
       if (upLine.includes('PRIORITY')) shipment.priority = 'High';
-      const phoneMatch = line.match(/\b\d{10}\b/);
-      if (phoneMatch && !shipment.phone) shipment.phone = phoneMatch[0];
+
+      // Strict AWB pattern: 12-15 digits
       const awbMatch = line.match(/\b\d{12,15}\b/);
       if (awbMatch && !shipment.awb) shipment.awb = awbMatch[0];
-      if (upLine.includes('DELIVERY -')) {
-        const dMatch = line.match(/(\d+)/);
-        if (dMatch) shipment.deliveryCount = parseInt(dMatch[1]);
-      }
+
       if (upLine.includes('LANDMARK:')) {
         shipment.landmark = line.replace(/LANDMARK:\s*/i, '').trim();
       }
@@ -111,11 +106,11 @@ export class ShipmentExtractor {
       }
     });
 
-    const addressLines = textLines.slice((nameIdx === -1 ? 0 : nameIdx) + 1)
-      .filter(l => !/Priority|Delivery -|LANDMARK:|COD|C\.O\.D/i.test(l) && !/\b\d{10}\b/.test(l) && !/\b\d{12,15}\b/.test(l));
-
-    shipment.village = addressLines[0];
-    shipment.town = addressLines[addressLines.length - 1];
+    const addressLines = textLines.filter((l, i) => i !== nameIdx && !/Priority|LANDMARK:|COD|C\.O\.D/i.test(l) && !/\b\d{12,15}\b/.test(l));
+    if (addressLines.length > 0) {
+      shipment.village = addressLines[0];
+      shipment.town = addressLines[addressLines.length - 1];
+    }
 
     return shipment;
   }
@@ -124,7 +119,6 @@ export class ShipmentExtractor {
     return {
       ...s,
       customerName: OCRCorrectionService.correctText(s.customerName || ''),
-      phone: OCRCorrectionService.correctNumeric(s.phone || ''),
       village: s.village ? OCRCorrectionService.correctText(s.village) : undefined,
       town: s.town ? OCRCorrectionService.correctText(s.town) : undefined,
       landmark: s.landmark ? OCRCorrectionService.correctText(s.landmark) : undefined,
@@ -142,7 +136,7 @@ export class ShipmentExtractor {
     shipments.forEach(s => {
       const isDup = unique.some(u =>
         (s.awb && u.awb && s.awb === u.awb) ||
-        (s.phone === u.phone && s.customerName.toLowerCase() === u.customerName.toLowerCase())
+        (s.customerName.toLowerCase() === u.customerName.toLowerCase() && s.village === u.village)
       );
       if (!isDup) unique.push(s);
     });
